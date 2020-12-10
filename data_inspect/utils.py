@@ -34,9 +34,66 @@ from astropy import units as u
 from astropy_healpix import HEALPix
 from astropy.coordinates import Galactic
 import healpy
+import yaml
 warnings.filterwarnings('ignore')
 
 
+
+def read_a_priori_ant_flags(a_priori_flags_yaml, ant_indices_only=False, by_ant_pol=False, ant_pols=None):
+    '''Parse an a priori flag YAML file for a priori antenna flags.
+    Parameters
+    ----------
+    a_priori_flags_yaml : str
+        Path to YAML file with a priori antenna flags
+    ant_indices_only : bool
+        If True, ignore polarizations and flag entire antennas when they appear, e.g. (1, 'Jee') --> 1.
+    by_ant_pol : bool
+        If True, expand all integer antenna indices into per-antpol entries using ant_pols
+    ant_pols : list of str
+        List of antenna polarizations strings e.g. 'Jee'. If not empty, strings in
+        the YAML must be in here or an error is raised. Required if by_ant_pol is True.
+    Returns
+    -------
+    a_priori_antenna_flags : list
+         List of a priori antenna flags, either integers or ant-pol tuples e.g. (0, 'Jee')
+    '''
+
+    if ant_indices_only and by_ant_pol:
+        raise ValueError("ant_indices_only and by_ant_pol can't both be True.")
+    apaf = []
+    apf = yaml.safe_load(open(a_priori_flags_yaml, 'r'))
+
+    # Load antenna flags
+    if 'ex_ants' in apf:
+        for ant in apf['ex_ants']:
+            # flag antenna number
+            if type(ant) == int:
+                apaf.append(ant)
+            # flag single antpol
+            elif (type(ant) == list) and (len(ant) == 2) and (type(ant[0]) == int) and (type(ant[1]) == str):
+                # check that antpol string is valid if ant_pols is not empty
+                if (ant_pols is not None) and (ant[1] not in ant_pols):
+                    raise ValueError(f'{ant[1]} is not a valid ant_pol in {ant_pols}.')
+                if ant_indices_only:
+                    apaf.append(ant[0])
+                else:
+                    apaf += [tuple(ant)]
+            else:
+                raise TypeError(f'ex_ants entires must be integers or a list of one int and one str. {ant} is not.')
+
+        # Expand all integer antenna flags into antpol pairs
+        if by_ant_pol:
+            if ant_pols is None:
+                raise ValueError('If by_ant_pol is True, then ant_pols must be specified.')
+            apapf = []
+            for ant in apaf:
+                if type(ant) == int:
+                    apapf += [(ant, pol) for pol in ant_pols]
+                else:  # then it's already and antpol tuple
+                    apapf.append(ant)
+            return sorted(set(apapf))
+
+    return list(set(apaf))
 
 def load_data(data_path,JD):
     HHfiles = sorted(glob.glob("{0}/zen.{1}.*.HH.uvh5".format(data_path,JD)))
@@ -328,7 +385,7 @@ def plot_autos(uvdx, uvdy):
     plt.close()
     
 def plot_wfs(uvd, pol, mean_sub=False, save=False, jd=''):
-    amps = np.abs(uvd.data_array[:, :, :, pol].reshape(uvd.Ntimes, uvd.Nants_data, uvd.Nfreqs, 1))
+#     amps = np.abs(uvd.data_array[:, :, :, pol].reshape(uvd.Ntimes, uvd.Nants_data, uvd.Nfreqs, 1))
     ants = uvd.get_ants()
     sorted_ants = sorted(ants)
     freqs = (uvd.freq_array[0])*10**(-6)
@@ -366,7 +423,7 @@ def plot_wfs(uvd, pol, mean_sub=False, save=False, jd=''):
         if mean_sub == True:
             ms = np.subtract(dat, np.nanmean(dat,axis=0))
             im = ax.imshow(ms, 
-                       vmin = -0.08, vmax = 0.08, aspect='auto',interpolation='nearest')
+                       vmin = -0.04, vmax = 0.04, aspect='auto',interpolation='nearest')
         else:
             im = ax.imshow(dat, 
                            vmin = vmin, vmax = vmax, aspect='auto',interpolation='nearest')
@@ -747,7 +804,7 @@ def plotVisibilitySpectra(file,jd,use_ants='auto',badAnts=[],pols=['xx','yy']):
     plt.show()
     plt.close()
     
-def plot_antenna_positions(uv, badAnts={},use_ants='auto'):
+def plot_antenna_positions(uv, badAnts=[],use_ants='auto'):
     """
     Plots the positions of all antennas that have data, colored by node.
     
@@ -762,6 +819,8 @@ def plot_antenna_positions(uv, badAnts={},use_ants='auto'):
     """
     
     plt.figure(figsize=(12,10))
+    if badAnts == None:
+        badAnts = []
     all_ants = uv.antenna_numbers
 #     nodes, antDict, inclNodes = generate_nodeDict(uv)
 #     N = len(inclNodes)
